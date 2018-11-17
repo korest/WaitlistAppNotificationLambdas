@@ -1,0 +1,113 @@
+service: WaitlistAppNotificationLambdas
+
+plugins:
+  - serverless-webpack
+
+provider:
+  name: aws
+  runtime: nodejs8.10
+
+  stage: dev
+  region: us-west-2
+  memorySize: 128
+
+custom:
+  notifyAtIndexName: NotifyAtIndex
+  notificationQueueName: NotificationQueue
+  waiteesTableName: Waitees
+  waiteesTableArn: WaitlistAppCrudLambdas-${self:provider.stage}.WaiteesTable
+
+functions:
+  NotificationProducerHandler:
+    handler: src/NotificationProducerHandler.producer
+    role: NotificationLambdaRole
+    events:
+    - schedule:
+        rate: rate(1 minute)
+        enabled: true
+    environment:
+      waiteesTableName: ${self:custom.waiteesTableName}
+      notifyAtIndexName: ${self:custom.notifyAtIndexName}
+      notificationQueueName: ${self:custom.notificationQueueName}
+  NotificationConsumerHandler:
+    handler: src/NotificationConsumerHandler.consumer
+    role: NotificationLambdaRole
+    events:
+    - sqs:
+        batchSize: 10
+        arn:
+          Fn::GetAtt:
+          - NotificationQueue
+          - Arn
+    environment:
+      waiteesTableName: ${self:custom.waiteesTableName}
+
+resources:
+  Resources:
+    NotificationQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:custom.notificationQueueName}
+        RedrivePolicy:
+          deadLetterTargetArn:
+            Fn::GetAtt:
+            - DeadNotificationQueue
+            - Arn
+          maxReceiveCount: 3
+
+    DeadNotificationQueue:
+      Type: AWS::SQS::Queue
+
+    NotificationLambdaRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: NotificationLambdaRole
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+              - lambda.amazonaws.com
+            Action: sts:AssumeRole
+        Policies:
+        - PolicyName: NotificationLambdaRolePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            - Effect: Allow
+              Action:
+              - dynamodb:UpdateItem
+              Resource: ${cf:${self:custom.waiteesTableArn}}
+            - Effect: Allow
+              Action:
+              - dynamodb:Query
+              Resource:
+                Fn::Join:
+                - "/"
+                - - ${cf:${self:custom.waiteesTableArn}}
+                  - "index"
+                  - "*"
+            - Effect: Allow
+              Action:
+              - sqs:GetQueueAttributes
+              - sqs:GetQueueUrl
+              - sqs:SendMessage
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              Resource:
+                Fn::GetAtt:
+                - NotificationQueue
+                - Arn
+            - Effect: Allow
+              Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              Resource:
+                Fn::Join:
+                - ":"
+                - - "arn:aws:logs"
+                  - Ref: AWS::Region
+                  - Ref: AWS::AccountId
+                  - "log-group:/aws/lambda/*:*:*"
