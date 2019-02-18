@@ -6,6 +6,7 @@ phases:
       - npm install --silent --progress=false -g npm
       - npm install --silent --progress=false -g serverless
       - npm install --silent --progress-false -g typescript
+      - npm install --silent --progress-false -g @types/node
       - npm install --silent --progress-false
       - npm --version
   build:
